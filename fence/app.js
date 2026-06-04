@@ -6,7 +6,9 @@ const clearBtn = document.getElementById('clear-btn');
 const SCALE = 5; 
 const GRID_8FT = 8 * SCALE; // 40px visual grid lines
 const SNAP_1FT = 1 * SCALE; // 5px snapping resolution
-const COST_PER_FOOT = 18.50;
+const COST_PER_POST = 55.50;
+const BOARDS_PER_BAY = 14;
+const COST_PER_BOARD = 11.28;
 
 // State management
 let segments = []; 
@@ -19,7 +21,7 @@ const house = {
     width: 64 * SCALE,   // 320px
     height: 35 * SCALE,  // 175px
     x: (canvas.width - (64 * SCALE)) / 2, // 240px
-    y: Math.floor((canvas.height - (35 * SCALE)) / 2 / SNAP_1FT) * SNAP_1FT, // 210px (snapped)
+    y: Math.floor((canvas.height - (35 * SCALE)) / 2 / SNAP_1FT) * SNAP_1FT, // 210px
     label: "MAIN RESIDENCE (64' x 35')"
 };
 
@@ -41,7 +43,6 @@ function drawHouse() {
     ctx.fillRect(house.x, house.y, house.width, house.height);
     ctx.strokeRect(house.x, house.y, house.width, house.height);
 
-    // Architectural cross-hatching
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.1)';
     for(let i = 0; i < house.width + house.height; i += 20) {
         ctx.beginPath();
@@ -56,7 +57,6 @@ function drawHouse() {
     ctx.fillText(house.label, house.x + (house.width / 2), house.y + (house.height / 2));
 }
 
-// Computes structural posts for a segment ensuring max 8ft spacing
 function getPostsForSegment(start, end) {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
@@ -64,7 +64,6 @@ function getPostsForSegment(start, end) {
     
     if (distanceInFeet === 0) return [];
 
-    // Calculate minimum spaces needed to keep gaps <= 8 feet
     const spaces = Math.ceil(distanceInFeet / 8);
     const segmentPosts = [];
 
@@ -78,25 +77,7 @@ function getPostsForSegment(start, end) {
     return segmentPosts;
 }
 
-function render() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawGrid();
-    drawHouse();
-
-    // Draw established fence runs
-    segments.forEach(seg => drawFenceSegment(seg.start, seg.end));
-
-    // Draw active drag preview
-    if (isDrawing && startPoint && currentPoint) {
-        ctx.save();
-        ctx.globalAlpha = 0.5; // Ghostly preview look
-        drawFenceSegment(startPoint, currentPoint);
-        ctx.restore();
-    }
-}
-
 function drawFenceSegment(start, end) {
-    // 1. Draw the Fence Rails (Line)
     ctx.strokeStyle = '#fbbf24'; 
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -104,7 +85,6 @@ function drawFenceSegment(start, end) {
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
 
-    // 2. Compute and Draw Structural Posts (Dots)
     const segmentPosts = getPostsForSegment(start, end);
     segmentPosts.forEach(post => {
         ctx.fillStyle = '#f59e0b';
@@ -117,10 +97,64 @@ function drawFenceSegment(start, end) {
     });
 }
 
-// New Pricing Constants
-const COST_PER_POST = 55.50;
-const BOARDS_PER_BAY = 14;
-const COST_PER_BOARD = 11.28;
+// NEW: Draws the real-time measurement badge below the cursor
+function drawTooltip(text, x, y) {
+    ctx.font = '11px monospace';
+    const padding = 6;
+    const textWidth = ctx.measureText(text).width;
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = 22;
+
+    // Center the pill horizontally below the cursor offset by 20px
+    const boxX = x - boxWidth / 2;
+    const boxY = y + 20;
+
+    // Draw background pill
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; // Sleek transparent slate dark
+    ctx.strokeStyle = '#38bdf8';            // Cyber blueprint blue border
+    ctx.lineWidth = 1;
+    
+    ctx.beginPath();
+    if (ctx.roundRect) {
+        ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4);
+    } else {
+        ctx.rect(boxX, boxY, boxWidth, boxHeight);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    // Draw text inside the pill
+    ctx.fillStyle = '#38bdf8';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, boxX + boxWidth / 2, boxY + boxHeight / 2);
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+    drawHouse();
+
+    // Draw established fence runs
+    segments.forEach(seg => drawFenceSegment(seg.start, seg.end));
+
+    // Draw active drag preview
+    if (isDrawing && startPoint && currentPoint) {
+        ctx.save();
+        ctx.globalAlpha = 0.5; 
+        drawFenceSegment(startPoint, currentPoint);
+        ctx.restore();
+
+        // Calculate active line length for live feedback
+        const dx = currentPoint.x - startPoint.x;
+        const dy = currentPoint.y - startPoint.y;
+        const activeFeet = Math.round(Math.sqrt(dx*dx + dy*dy) / SCALE);
+        
+        if (activeFeet > 0) {
+            drawTooltip(`${activeFeet} ft`, currentPoint.x, currentPoint.y);
+        }
+    }
+}
 
 function updateCalculations() {
     let totalFeet = 0;
@@ -133,12 +167,10 @@ function updateCalculations() {
         const distanceInFeet = Math.sqrt(dx*dx + dy*dy) / SCALE;
         totalFeet += distanceInFeet;
 
-        // Calculate how many 8ft bays are in this specific segment run
         if (distanceInFeet > 0) {
             totalBays += Math.ceil(distanceInFeet / 8);
         }
 
-        // Gather and filter unique physical posts
         const segPosts = getPostsForSegment(seg.start, seg.end);
         segPosts.forEach(sp => {
             if (!uniquePosts.some(up => Math.abs(up.x - sp.x) < 1 && Math.abs(up.y - sp.y) < 1)) {
@@ -147,7 +179,6 @@ function updateCalculations() {
         });
     });
 
-    // Materials Calculations
     const postCount = uniquePosts.length;
     const boardCount = totalBays * BOARDS_PER_BAY;
 
@@ -155,7 +186,6 @@ function updateCalculations() {
     const totalBoardCost = boardCount * COST_PER_BOARD;
     const finalInvoiceTotal = totalPostCost + totalBoardCost;
 
-    // Render numbers to the Sidebar UI
     document.getElementById('total-feet').innerHTML = `${Math.round(totalFeet)} <small>lin ft</small>`;
     
     document.getElementById('total-posts').innerHTML = 
@@ -177,7 +207,6 @@ canvas.addEventListener('mousedown', (e) => {
     let snapX = Math.round(rawX / SNAP_1FT) * SNAP_1FT;
     let snapY = Math.round(rawY / SNAP_1FT) * SNAP_1FT;
 
-    // Chain mechanism: Snap to nearby existing terminal endpoints
     segments.forEach(seg => {
         if (Math.abs(seg.end.x - snapX) < 15 && Math.abs(seg.end.y - snapY) < 15) {
             snapX = seg.end.x; snapY = seg.end.y;
@@ -201,7 +230,6 @@ canvas.addEventListener('mousemove', (e) => {
     const dx = mouseX - startPoint.x;
     const dy = mouseY - startPoint.y;
 
-    // Intelligent Orthogonal Locking (Enforces perfect 90-degree lines when dragging)
     if (Math.abs(dx) > Math.abs(dy)) {
         currentPoint = {
             x: Math.round(mouseX / SNAP_1FT) * SNAP_1FT,
@@ -219,7 +247,6 @@ canvas.addEventListener('mousemove', (e) => {
 canvas.addEventListener('mouseup', () => {
     if (!isDrawing) return;
     
-    // Only commit if the drag actually spanned a distance
     if (startPoint.x !== currentPoint.x || startPoint.y !== currentPoint.y) {
         segments.push({ start: { ...startPoint }, end: { ...currentPoint } });
     }
